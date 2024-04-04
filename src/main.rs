@@ -1,6 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use askama::Template;
+use tower_livereload::LiveReloadLayer;
 
 use axum::{
     http::StatusCode,
@@ -9,12 +10,12 @@ use axum::{
     Router,
 };
 
+use tower_http::services::ServeDir;
 
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn tracing() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -23,18 +24,24 @@ async fn main() -> Result<()> {
                 )
         .with(tracing_subscriber::fmt::layer())
         .init();
+}
 
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing();
     info!("Initializing router...");
+    let router = Router::new()
+        .route("/", get(root))
+        .nest_service("/assets", ServeDir::new("assets"))
+        .layer(LiveReloadLayer::new());
 
-    let router = Router::new().route("/", get(hello));
-    let port = 8000_u16;
-    let addr = std::net::SocketAddr::from(([0,0,0,0], port));
 
-    info!("router initialized now listening on port {}", port);
-
-    let listener = tokio::net::TcpListener::bind(addr)
+    let port = 8000;
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
         .context("error while connecting to tcp port.")?;
+
+    info!("router initialized now listening on port {}", port);
 
     axum::serve(listener, router)
         .await
@@ -43,28 +50,29 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn hello() -> impl IntoResponse {
-    let template = HelloTemplate {};
-    HtmlTemplate(template)
-}
-
 #[derive(Template)]
 #[template(path = "hello.html")]
 struct HelloTemplate;
 
-struct HtmlTemplate<T>(T);
-
-impl<T> IntoResponse for HtmlTemplate<T>
-where
-    T: Template,
-{
-    fn into_response(self) -> Response {
-        match self.0.render() {
-            Ok(html) => Html(html).into_response(),
-            Err(err) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to render template. Error: {}", err),
-            ).into_response()
-        }
-    }
+async fn root() -> impl IntoResponse {
+    info!("getting root");
+    HelloTemplate{}.into_response()
 }
+
+
+// struct HtmlTemplate<T>(T);
+
+// impl<T> IntoResponse for HtmlTemplate<T>
+// where
+//     T: Template,
+// {
+//     fn into_response(self) -> Response {
+//         match self.0.render() {
+//             Ok(html) => Html(html).into_response(),
+//             Err(err) => (
+//                 StatusCode::INTERNAL_SERVER_ERROR,
+//                 format!("Failed to render template. Error: {}", err),
+//             ).into_response()
+//         }
+//     }
+// }
